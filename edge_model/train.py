@@ -137,6 +137,18 @@ def apply_overrides(config: dict, args: argparse.Namespace) -> dict:
     return deep_update(config, updates)
 
 
+def enforce_training_protocol(config: dict, config_path: Path) -> None:
+    """Reject archived configurations whose validation and test sets overlap."""
+    protocol = config.get("paper_protocol", {}) or {}
+    if bool(protocol.get("training_disabled", False)):
+        replacement = protocol.get("replacement", "a strict V5 configuration")
+        reason = protocol.get("reason", "the protocol is archived and non-strict")
+        raise RuntimeError(
+            f"Training is disabled for archived config {config_path}: {reason}. "
+            f"Use {replacement}."
+        )
+
+
 def request_stop(signum, _frame) -> None:
     """Signal handler that asks training to checkpoint after the current update."""
     global STOP_REQUESTED
@@ -431,6 +443,7 @@ def main(args: argparse.Namespace) -> None:
     """Run the complete training workflow."""
     config_path = args.config if args.config.is_absolute() else PROJECT_ROOT / args.config
     config = apply_overrides(load_config(config_path), args)
+    enforce_training_protocol(config, config_path.resolve())
     config["paths"]["project_root"] = str(PROJECT_ROOT)
     seed_everything(
         int(config.get("seed", 42)),
@@ -701,11 +714,11 @@ def main(args: argparse.Namespace) -> None:
                 )
                 if save_eval_candidates:
                     save_checkpoint_atomic(checkpoint, candidate_dir / f"epoch_{epoch:03d}.pt")
-                save_checkpoint_atomic(checkpoint, run_paths.checkpoints / "best_train_metric.pt")
+                save_checkpoint_atomic(checkpoint, run_paths.checkpoints / "best_validation_metric.pt")
                 save_checkpoint_atomic(checkpoint, run_paths.checkpoints / "best.pt")
                 label = "provisional best" if strict_selection_enabled else "best"
                 print(
-                    f"Saved {label} checkpoint with train-metric score={best_score:.4f}, "
+                    f"Saved {label} checkpoint with validation score={best_score:.4f}, "
                     f"ODS={float(val_metrics.get('ODS', 0.0)):.4f}"
                 )
             else:
@@ -829,7 +842,12 @@ def normalize_strict_selection_config(config: dict) -> dict:
         "output_name": str(raw_cfg.get("output_name", "best_strict.pt")),
         "candidate_dir": str(raw_cfg.get("candidate_dir", "eval_candidates")),
         "include_last": bool(raw_cfg.get("include_last", True)),
-        "include_train_metric_best": bool(raw_cfg.get("include_train_metric_best", True)),
+        "include_validation_metric_best": bool(
+            raw_cfg.get(
+                "include_validation_metric_best",
+                raw_cfg.get("include_train_metric_best", True),
+            )
+        ),
     }
 
 
@@ -941,12 +959,14 @@ def collect_selection_candidates(checkpoint_dir: Path, selection_cfg: dict) -> l
     candidates: list[Path] = []
     if candidate_dir.exists():
         candidates.extend(sorted(candidate_dir.glob("epoch_*.pt")))
-    # When per-epoch candidates are saved, best_train_metric.pt and last.pt are
+    # When per-epoch candidates are saved, the validation-best and last.pt are
     # usually copies of one of those epoch checkpoints. Falling back to them only
     # when no epoch candidates exist avoids repeated strict re-evaluation.
     if not candidates:
-        if bool(selection_cfg.get("include_train_metric_best", True)):
-            candidates.append(checkpoint_dir / "best_train_metric.pt")
+        if bool(selection_cfg.get("include_validation_metric_best", True)):
+            validation_best = checkpoint_dir / "best_validation_metric.pt"
+            legacy_best = checkpoint_dir / "best_train_metric.pt"
+            candidates.append(validation_best if validation_best.exists() else legacy_best)
         if bool(selection_cfg.get("include_last", True)):
             candidates.append(checkpoint_dir / "last.pt")
 

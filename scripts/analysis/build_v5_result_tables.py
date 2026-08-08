@@ -57,6 +57,15 @@ PR_PROTOCOL_SHORT = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--scope",
+        choices=("internal", "full"),
+        default="full",
+        help=(
+            "Internal writes Tables 1-3 from released H-RBCM assets only. "
+            "Full additionally requires separately obtained external evidence for Tables 4-5."
+        ),
+    )
+    parser.add_argument(
         "--same-domain",
         type=Path,
         default=ROOT / "edge_outputs/rbcm/tables/strict_protocols/same_domain_strict.csv",
@@ -242,9 +251,6 @@ def main() -> None:
     multicue = read_csv(args.multicue_transfer.resolve())
     nyud = read_csv(args.nyud_transfer.resolve())
     biped = read_csv(args.biped_transfer.resolve())
-    external = read_csv(args.external_transfer.resolve())
-    pr_manifest = read_csv(args.pr_manifest.resolve())
-
     tables = {
         "01_same_domain_ablation.csv": internal_rows(
             same, "dataset", ("BIPED", "MultiCue", "NYUDv2"), "Dataset"
@@ -256,11 +262,18 @@ def main() -> None:
             ("BIPED", "NYUDv2", "BSDS500", "UDED"),
             "Target",
         ),
-        "04_selected_external_cross_domain.csv": table_4(external),
-        "05a_biped_same_target_pr_models.csv": pr_table(pr_manifest, 1),
-        "05b_multicue_same_target_pr_models.csv": pr_table(pr_manifest, 7),
-        "05c_nyudv2_same_target_pr_models.csv": pr_table(pr_manifest, 13),
     }
+    if args.scope == "full":
+        external = read_csv(args.external_transfer.resolve())
+        pr_manifest = read_csv(args.pr_manifest.resolve())
+        tables.update(
+            {
+                "04_selected_external_cross_domain.csv": table_4(external),
+                "05a_biped_same_target_pr_models.csv": pr_table(pr_manifest, 1),
+                "05b_multicue_same_target_pr_models.csv": pr_table(pr_manifest, 7),
+                "05c_nyudv2_same_target_pr_models.csv": pr_table(pr_manifest, 13),
+            }
+        )
 
     output = args.output_dir.resolve()
     for filename, rows in tables.items():

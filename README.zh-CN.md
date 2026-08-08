@@ -33,6 +33,7 @@ python -m pip install -r requirements-repro.txt
 python -m pip install -e .
 python scripts/release/verify_paper_release.py --code-root .
 python scripts/release/smoke_paper_release.py --checkpoint-root pretrained --dataset all
+python scripts/release/reproduce_release.py --checkpoint-root pretrained --stage all
 ```
 
 统一 Python 评估器会恢复原图尺寸、按配置执行 NMS、扫描固定阈值，并使用

@@ -1,41 +1,34 @@
-# RBCM-Edge 复现说明
+# RBCM-Edge V5 复现说明
 
 本文档覆盖论文最终使用的 MEA 分析和 H-RBCM 边缘检测实验，不包含已废弃的历史模型路线。
 
-## 1. 获取代码和大文件
+## 1. 准备代码和资源
 
 克隆公开仓库的 `release` 分支，并把单独发布的资源解压到代码根目录：
 
 ```text
 RBCM-Edge/
-  pretrained/   # 精选 checkpoint 与验证集冻结候选
-  edge_data/    # 正式边缘检测数据和划分文件
+  pretrained/   # checkpoint 与验证集冻结候选
+  edge_data/    # 正式边缘数据集和划分文件
   MEA_data/     # 经授权可共享的 MEA 输入
 ```
 
-解压前必须用 `DOWNLOADS.md` 中的 SHA-256 核验压缩包。只有在原始数据许可、
-伦理、知情同意和机构数据共享要求允许时，才能公开分发数据集或 MEA 数据。
-
-公开 MEA 输入从 Kilosort 输出和下游衍生矩阵开始；连续采集文件
-`data.raw.h5` 及转换后的 `data.raw.bin` 不在下载包内，也不是复现公开
-轨迹分析、统计检验和结果图所必需的输入。
+解压前使用 `DOWNLOADS.md` 中的 SHA-256 校验压缩包。数据只能在原始许可、伦理和机构共享要求允许时分发。
 
 ## 2. 创建环境
 
-严格 NYUDv2 本地训练和验证环境为 Python 3.10.16、PyTorch
-2.7.1+cu126、torchvision 0.22.1+cu126；严格 MultiCue 使用服务器镜像
-`cuda128_torch280_py312`。先安装与本机 CUDA 匹配的 PyTorch，再安装经过
-测试的其余依赖：
+严格 NYUDv2 本地环境为 Python 3.10.16、PyTorch 2.7.1+cu126 和 torchvision
+0.22.1+cu126；严格 MultiCue 使用服务器镜像 `cuda128_torch280_py312`。安装与本机
+CUDA 匹配的 PyTorch 后运行：
 
 ```bash
 python -m pip install -r requirements-repro.txt
 python -m pip install -e .
 ```
 
-不同 GPU、CUDA、cuDNN 和 NMS 实现可能带来很小的数值差异。必须保持划分哈希、
-候选文件、预测方向和评估后端一致。
+不同 GPU、CUDA、cuDNN 和 NMS 实现可能产生很小的数值差异。划分身份、冻结候选、预测方向和评估后端必须一致。
 
-## 3. 评估前完整性检查
+## 3. 运行发布版检查
 
 ```bash
 python scripts/release/verify_paper_release.py --code-root .
@@ -47,17 +40,23 @@ python scripts/checks/audit_nyud_strict_protocol.py \
 python scripts/checks/run_rbcm_paper_preflight.py --check-data
 ```
 
-正式协议为：
+正式协议为：BIPED 170/30/50 并使用三个固定划分；MultiCue 68/12/20 个源图像互斥；
+NYUDv2 RGB 为 381/414/654；BSDS500 和 UDED 只作为评估或迁移目标。
 
-- BIPED：固定 170 train / 30 validation / 50 test；稳定性表使用三个固定重复划分；
-- MultiCue：68 个训练源、12 个验证源、20 个一次性独立测试源，三组源图像完全互斥；
-  checkpoint 和校准候选在读取测试集前冻结；
-- NYUDv2 RGB：381 train / 414 validation / 654 held-out test；
-- BSDS500 与 UDED：当前论文中作为评估或迁移目标，不是主要训练证据。
+## 4. 一体化复现 V5 内部结果
 
-## 4. 用给定权重复现推理和得分
+下面的入口会按依赖顺序执行发布检查、协议检查、三个冻结训练源的推理与正式评估、
+标准化结果输入、V5 内部表1-3、图5和最终完整性审计：
 
-对图像目录导出四种匹配模式中的任意一种：
+```bash
+python scripts/release/reproduce_release.py \
+  --checkpoint-root pretrained --device cuda
+```
+
+长时间运行前可加入 `--dry-run` 查看完整命令计划。没有授权 MEA 包时可加入
+`--skip-mea`。这条流水线不训练模型，也不会在测试集或目标域上搜索候选参数。
+
+单张图像目录推理示例：
 
 ```bash
 python edge_model/infer.py \
@@ -69,42 +68,25 @@ python edge_model/infer.py \
   --candidate-csv pretrained/nyudv2_strict/fixed_candidates.csv
 ```
 
-用冻结的严格 NYUDv2 checkpoint 完成五目标评估：
+论文评估器恢复原图尺寸、执行固定 NMS 和阈值扫描，并使用数据集固定空间容差。
+它是统一的近官方 Python dilation matcher，不是 BSDS 官方 Matlab 精确二分匹配器。
+
+## 5. 表格边界
+
+代码、checkpoint 和数据可以独立重建内部表1-3。表4和表5包含第三方模型结果，
+需要另外取得外部证据目录，其中至少包含 `source_matched_learned.csv`、
+`curve_manifest.csv` 和其引用的外部 PR 曲线：
 
 ```bash
-python scripts/analysis/evaluate_nyud_strict_generalization.py \
-  --config edge_model/configs/rbcm/nyudv2_strict.yaml \
-  --checkpoint pretrained/nyudv2_strict/best.pt \
-  --formal-summary pretrained/nyudv2_strict/formal_summary.json \
-  --run-tag nyudv2_strict_reproduction \
-  --datasets BIPED Multicue NYUDv2 BSDS500 UDED \
-  --device cuda --batch-size 1 --num-workers 2
+python scripts/release/reproduce_release.py --stage tables \
+  --external-evidence-root external_evidence
 ```
 
-论文评估器会恢复原图尺寸、按配置执行 NMS、扫描固定阈值，并按数据集使用固定空间
-容差。它是统一的近官方 Python dilation matcher，不是 BSDS 官方 Matlab 精确二分
-匹配器。不同后端的绝对分数不能在不标注协议的情况下直接混比。
-
-## 5. 在本地重建结果表和指标图
-
-```bash
-python scripts/analysis/build_formal_result_index.py
-python scripts/analysis/build_strict_protocol_tables.py
-python scripts/analysis/build_requested_cross_domain_report.py
-python scripts/analysis/build_v5_result_tables.py
-python scripts/figures/edge/plot_joint_ablation_metrics.py
-```
-
-`build_v5_result_tables.py` 直接从正式评估输出重建 V5 稿件使用的七张 CSV 表，
-脚本中没有硬编码论文分数。
-当前正式表只使用 BIPED、严格 MultiCue 和严格 NYUDv2。重建旧 MultiCue 重合协议
-的脚本必须显式传入归档参数，不能用于正文主表。
-公开分支不跟踪任何已生成表格或图片。
+没有外部证据时，程序不会用论文中的数字代替真实评估输出。所有生成结果写入被 Git 忽略的 `edge_outputs/`。
+`build_v5_result_tables.py` 本身不保存论文分数；内部表1-3来自标准化评估输出，
+表4-5只有在提供外部证据包后才生成。
 
 ## 6. 从头训练
-
-`last.pt` 保存模型、优化器、调度器、AMP scaler、最佳分数、配置和 RNG 状态，因此
-支持断点恢复：
 
 ```bash
 python edge_model/train.py \
@@ -113,30 +95,17 @@ python edge_model/train.py \
   --config edge_model/configs/rbcm/nyudv2_strict.yaml --resume
 ```
 
-MultiCue 使用 `edge_model/configs/rbcm/multicue_strict.yaml`，必须保持提供的严格
-划分。校准候选只能用验证集选择，测试集必须在候选冻结后才能读取。`calibrate.py`
-默认只运行验证集选择；论文测试应把冻结候选 CSV 交给 `evaluate_generalization.py`。
-旧的组合入口只有显式传入 `--evaluate-test`，且候选文件完成哈希冻结后，才会读取测试集。严格 MultiCue
-和 NYUDv2 均只提供一个随机种子，因此论文不能声称这两项具有多 seed 统计显著性。
+MultiCue 必须使用 `multicue_strict.yaml`。候选参数只能由验证集选择，测试集必须在候选
+写入并哈希冻结后才可读取。历史 `multicue.yaml`、`nyudv2.yaml` 和 `bsds500.yaml`
+的验证集与测试集完全重合，训练入口会拒绝它们，公开 release 也不包含它们。
 
-## 7. 复现 MEA 分析
+新训练保存 `best_validation_metric.pt`；读取旧实验时仍兼容历史名称
+`best_train_metric.pt`。`last.pt` 保存模型、优化器、调度器、AMP scaler、配置和 RNG 状态。
+
+## 7. MEA 与图5
 
 ```bash
-python scripts/analysis/run_mea_pipeline.py --list
 python scripts/analysis/run_mea_pipeline.py
-```
-
-流水线读取 `MEA_data/`，并向 `MEA_outputs/` 写入最终表格、统计摘要和图片。该分析
-比较 UME/CME 条件下空间匹配的局部群体，不是跨 recording 的单细胞一一配对。
-
-### 复现 V5 图5分析
-
-先用冻结的严格 MultiCue checkpoint 为 BIPED、MultiCue、NYUDv2 和 UDED 生成
-Anchor 预测，再从正式 MEA 表、输入图像和验证集冻结候选计算 V5 源表：
-
-```bash
-python scripts/figures/edge/generate_multicue_strict_pr_curves.py \
-  --checkpoint-root pretrained --device cuda
 python scripts/analysis/reproduce_figure5_relative_statistics.py \
   --candidate-csv pretrained/multicue_strict/calibration_candidates.csv
 python scripts/figures/bridge/render_figure5_relative_panels.py \
@@ -144,11 +113,15 @@ python scripts/figures/bridge/render_figure5_relative_panels.py \
   --output-dir edge_outputs/rbcm/figures/mea_rbcm_bridge/figure5_relative
 ```
 
-脚本使用纯 H-RBCM 项 `alpha * U * C`，状态分类不使用目标 GT；图中比较的是
-样本内标准化后的相对空间异质性，不表示 MEA 与网络原始绝对效应分布相同。
+图5使用纯 H-RBCM 项 `alpha * U * C`，状态分类不读取目标 GT。图中比较的是样本内
+归一化后的相对空间异质性，不表示 MEA 与网络原始绝对效应分布相同。
 
-## 8. 预期结果边界
+## 8. 结果一致性
 
-重新生成的预测、表格、统计结果和图片都写入被忽略的输出目录，不随 GitHub 分支
-发布。不同硬件上应复现接近的数值，而不要求所有浮点输出逐字节一致。只有在协议、
-划分身份、冻结候选、评估后端和指标定义一致时，才可把数值视为同一实验的复现。
+复现结果应与 V5 接近，但不要求不同硬件和库版本下逐字节一致。只有协议、划分身份、
+冻结候选、评估后端和指标定义一致时，才可视为同一实验的复现。
+
+MultiCue 会先要求新生成的保存概率图指标与 checkpoint 中的全精度冻结参考值在
+`1e-4` 内一致，再使用 canonical 全精度值，避免 GPU 与 uint8 PNG 量化单独造成
+第四位小数变化。NYUDv2 浮点概率指标必须在 `5e-8` 内一致。两类差值都会写入
+`edge_outputs/rbcm/reproduction/v5/inputs/reproduction_manifest.json`。

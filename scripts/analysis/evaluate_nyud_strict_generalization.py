@@ -108,6 +108,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--thresholds", type=int, default=99)
     parser.add_argument("--official-dir-name", default="official")
     parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument(
+        "--compute-internal-metrics",
+        action="store_true",
+        help="Also compute the calibration-path metrics used by the V5 same-domain table.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
@@ -313,11 +318,29 @@ def apply_dataset(
         "--candidate-split",
         "val",
         "--save-predictions",
-        "--skip-internal-metrics",
     ]
+    if not args.compute_internal_metrics:
+        command.append("--skip-internal-metrics")
     if args.max_samples is not None:
         command.extend(["--max-samples", str(args.max_samples)])
-    run_command(args, f"apply_{spec.name}", command, done_path=out / "summary.json")
+    summary_csv = out / "summary.csv"
+    metrics_complete = False
+    if summary_csv.is_file():
+        with summary_csv.open(newline="", encoding="utf-8-sig") as handle:
+            existing = list(csv.DictReader(handle))
+        metrics_complete = bool(existing) and all(
+            str(row.get("metrics_skipped", "")).lower() == "false"
+            and row.get("ODS", "")
+            and row.get("OIS", "")
+            and row.get("AP", "")
+            for row in existing
+        )
+    done_path = (
+        out / "summary.json"
+        if not args.compute_internal_metrics or metrics_complete
+        else None
+    )
+    run_command(args, f"apply_{spec.name}", command, done_path=done_path)
     return out
 
 

@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset",
-        choices=("all", "multicue", "nyudv2"),
+        choices=("all", "biped", "multicue", "nyudv2"),
         default="all",
         help="Selected strict checkpoint package to smoke-test.",
     )
@@ -86,20 +86,32 @@ def smoke_checkpoint(
     dataset: str,
     config_override: Path | None,
 ) -> str:
-    package_name = f"{dataset}_strict"
-    checkpoint = checkpoint_root / package_name / "best.pt"
-    candidate_names = (
-        ("calibration_candidates.csv", "fixed_candidates.csv")
-        if dataset == "multicue"
-        else ("fixed_candidates.csv", "calibration_candidates.csv")
+    if dataset == "biped":
+        package_options = (Path("biped/main"),)
+    else:
+        package_options = (Path(f"{dataset}_strict"), Path(f"{dataset}/main"))
+    package_root = next(
+        (checkpoint_root / option for option in package_options if (checkpoint_root / option).is_dir()),
+        checkpoint_root / package_options[0],
     )
+    package_name = package_root.relative_to(checkpoint_root).as_posix()
+    checkpoint = package_root / "best.pt"
+    if dataset == "biped":
+        candidate_names = (
+            "calibration_candidates.csv",
+            "calibration_main_candidates.csv",
+        )
+    elif dataset == "multicue":
+        candidate_names = ("calibration_candidates.csv", "fixed_candidates.csv")
+    else:
+        candidate_names = ("fixed_candidates.csv", "calibration_candidates.csv")
     candidates = next(
         (
-            checkpoint_root / package_name / name
+            package_root / name
             for name in candidate_names
-            if (checkpoint_root / package_name / name).is_file()
+            if (package_root / name).is_file()
         ),
-        checkpoint_root / package_name / candidate_names[0],
+        package_root / candidate_names[0],
     )
     if not checkpoint.exists() or not candidates.exists():
         raise FileNotFoundError(
@@ -109,7 +121,11 @@ def smoke_checkpoint(
     config_path = (
         config_override
         if config_override is not None
-        else ROOT / f"edge_model/configs/rbcm/{dataset}_strict.yaml"
+        else ROOT / (
+            f"edge_model/configs/rbcm/{dataset}_strict.yaml"
+            if dataset != "biped"
+            else "edge_model/configs/rbcm/biped.yaml"
+        )
     )
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     model = build_model(config)
@@ -158,7 +174,7 @@ def smoke_checkpoint(
 def main() -> None:
     args = parse_args()
     if args.config is not None and args.dataset == "all":
-        raise ValueError("--config requires --dataset multicue or --dataset nyudv2")
+        raise ValueError("--config requires one selected dataset")
 
     mea_scripts = sorted((ROOT / "MEA_analysis").glob("*.py")) + sorted(
         (ROOT / "MEA_model").glob("*/plot_*.py")
@@ -170,7 +186,7 @@ def main() -> None:
     for script in mea_scripts:
         compile(script.read_text(encoding="utf-8"), str(script), "exec")
 
-    datasets = ("multicue", "nyudv2") if args.dataset == "all" else (args.dataset,)
+    datasets = ("biped", "multicue", "nyudv2") if args.dataset == "all" else (args.dataset,)
     reports = [
         smoke_checkpoint(args.checkpoint_root, dataset, args.config)
         for dataset in datasets

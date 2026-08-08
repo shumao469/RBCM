@@ -66,6 +66,19 @@ The expected formal data protocols are:
 
 ## 4. Reproduce checkpoint inference and scores
 
+The unified entry point executes release verification, strict-protocol checks,
+all three frozen internal sources, normalized table inputs, internal V5 Tables
+1-3, Figure 5, and the final integrity audit in dependency order:
+
+```bash
+python scripts/release/reproduce_release.py \
+  --checkpoint-root pretrained --device cuda
+```
+
+Use `--dry-run` to inspect every command before a long run and `--skip-mea`
+when the authorized MEA package is unavailable. This pipeline never trains a
+model and never searches candidates on a test or target-domain split.
+
 For a single image directory, export any of the four matched modes:
 
 ```bash
@@ -106,17 +119,33 @@ python scripts/analysis/build_v5_result_tables.py
 python scripts/figures/edge/plot_joint_ablation_metrics.py
 ```
 
-`build_v5_result_tables.py` reconstructs the seven CSV tables used by manuscript
-V5 directly from evaluator outputs; it contains no hard-coded paper scores.
+`build_v5_result_tables.py` reconstructs internal Tables 1-3 directly from the
+normalized evaluator outputs; it contains no hard-coded paper scores. Tables
+4-5 are added only when their external evidence package is supplied.
 The current formal tables contain BIPED, strict MultiCue, and strict NYUDv2.
 Scripts that reconstruct the retired overlapping MultiCue route require an
 explicit archival flag and must not be used for the main paper table.
 No generated table or rendered figure is tracked in the public branch.
 
+The code/checkpoint/data release can independently rebuild internal Tables 1-3.
+Tables 4-5 contain third-party model comparisons and require a separately
+obtained evidence directory containing `source_matched_learned.csv` and
+`curve_manifest.csv` plus the referenced external PR curves. Enable that stage
+explicitly:
+
+```bash
+python scripts/release/reproduce_release.py --stage tables \
+  --external-evidence-root external_evidence
+```
+
+The release does not substitute paper values when external evidence is absent.
+
 ## 6. Reproduce training
 
 Training is resumable because `last.pt` stores the model, optimizer, scheduler,
 AMP scaler, best score, configuration, and RNG state.
+New runs name the metric-selected checkpoint `best_validation_metric.pt`;
+read-only compatibility with historical `best_train_metric.pt` is retained.
 
 ```bash
 python edge_model/train.py \
@@ -134,6 +163,10 @@ path requires an explicit `--evaluate-test` only after the candidate hash is
 written.
 One seed is supplied for strict MultiCue and NYUDv2, so the paper must not
 claim multi-seed statistical significance for those rows.
+
+The historical `multicue.yaml`, `nyudv2.yaml`, and `bsds500.yaml` files have
+fully overlapping validation/test manifests. They are disabled for training,
+excluded from the release, and must not be used as V5 protocols.
 
 ## 7. Reproduce MEA analysis
 
@@ -177,3 +210,10 @@ floating-point output on every hardware stack. A result is consistent when the
 protocol, split identities, frozen candidates, evaluator backend, and metric
 definitions match and deviations are limited to ordinary hardware/library
 variation.
+
+For MultiCue, the pipeline first requires newly evaluated saved-map metrics to
+agree with the full-precision checkpoint reference within `1e-4`. It then uses
+that canonical reference to avoid a fourth-decimal change caused solely by GPU
+and uint8 PNG quantization. NYUDv2 floating-probability metrics must agree
+within `5e-8`. Both deltas are recorded in
+`edge_outputs/rbcm/reproduction/v5/inputs/reproduction_manifest.json`.

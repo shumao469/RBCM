@@ -45,7 +45,7 @@ CONFIGS = {
     "NYUDv2": PROJECT_ROOT / "edge_model" / "configs" / "rbcm" / "nyudv2_strict.yaml",
 }
 
-WEIGHT_ROOTS = {
+DEVELOPMENT_WEIGHT_ROOTS = {
     "BIPED": PROJECT_ROOT / "edge_outputs" / "rbcm" / "checkpoints" / "biped",
     "Multicue": PROJECT_ROOT / "edge_outputs" / "rbcm" / "checkpoints" / "multicue" / "main",
     "NYUDv2": PROJECT_ROOT / "edge_outputs" / "rbcm" / "checkpoints" / "nyudv2" / "main",
@@ -78,12 +78,54 @@ def parse_args() -> argparse.Namespace:
         default=PROJECT_ROOT / "results" / "rbcm" / "audits" / "full_pipeline_20260723",
     )
     parser.add_argument(
+        "--checkpoint-root",
+        type=Path,
+        default=None,
+        help=(
+            "Checkpoint package root. Accepts the public pretrained/ layout or "
+            "the development edge_outputs/rbcm/checkpoints layout. Auto-detect by default."
+        ),
+    )
+    parser.add_argument(
+        "--require-results",
+        action="store_true",
+        help="Treat missing generated result tables as errors after a full reproduction run.",
+    )
+    parser.add_argument(
         "--train-dimension-samples",
         type=int,
         default=512,
         help="Maximum train pairs per dataset whose raw image/GT dimensions are checked.",
     )
     return parser.parse_args()
+
+
+def resolve_weight_roots(checkpoint_root: Path | None) -> dict[str, Path]:
+    if checkpoint_root is None:
+        public_root = PROJECT_ROOT / "pretrained"
+        if (public_root / "multicue_strict").is_dir():
+            checkpoint_root = public_root
+        else:
+            return DEVELOPMENT_WEIGHT_ROOTS
+    root = checkpoint_root.resolve()
+    public = {
+        "BIPED": root / "biped",
+        "Multicue": root / "multicue_strict",
+        "NYUDv2": root / "nyudv2_strict",
+    }
+    if all(path.is_dir() for path in public.values()):
+        return public
+    development = {
+        "BIPED": root / "biped",
+        "Multicue": root / "multicue" / "main",
+        "NYUDv2": root / "nyudv2" / "main",
+    }
+    if all(path.is_dir() for path in development.values()):
+        return development
+    raise FileNotFoundError(
+        "Checkpoint root is neither a public pretrained/ package nor a development "
+        f"checkpoint tree: {root}"
+    )
 
 
 def add_issue(
@@ -262,9 +304,9 @@ def audit_datasets(issues: list[Issue], train_dimension_samples: int) -> dict:
     return report
 
 
-def audit_checkpoints(issues: list[Issue]) -> dict:
+def audit_checkpoints(issues: list[Issue], weight_roots: dict[str, Path]) -> dict:
     report: dict[str, list[dict]] = {}
-    for dataset_name, root in WEIGHT_ROOTS.items():
+    for dataset_name, root in weight_roots.items():
         rows = []
         config = load_yaml(CONFIGS[dataset_name])
         reference_model = build_model(config)
@@ -338,11 +380,11 @@ def finite_or_blank(value: str) -> bool:
         return False
 
 
-def audit_candidates(issues: list[Issue]) -> dict:
+def audit_candidates(issues: list[Issue], weight_roots: dict[str, Path]) -> dict:
     report: dict[str, dict] = {}
     candidate_paths = sorted(
         csv_path
-        for root in WEIGHT_ROOTS.values()
+        for root in weight_roots.values()
         for csv_path in root.rglob("*candidates.csv")
     )
     for csv_path in candidate_paths:
@@ -454,7 +496,7 @@ def audit_summaries(issues: list[Issue]) -> dict:
     return report
 
 
-def audit_ap(issues: list[Issue]) -> dict:
+def audit_ap(issues: list[Issue], require_results: bool = False) -> dict:
     synthetic = [
         {"recall": 0.2, "precision": 0.9},
         {"recall": 0.2, "precision": 0.8},
@@ -478,7 +520,7 @@ def audit_ap(issues: list[Issue]) -> dict:
                 for metric in ("ODS", "OIS", "AP"):
                     if metric in row and not finite_or_blank(row[metric]):
                         add_issue(issues, "ERROR", "metrics", "NONFINITE_TABLE_METRIC", f"row={index}, metric={metric}, value={row[metric]}", table_path, "direct")
-        else:
+        elif require_results:
             add_issue(issues, "ERROR", "metrics", "MISSING_CORRECTED_TABLE", "Corrected paper table is missing.", table_path, "direct")
         tables[str(table_path.relative_to(PROJECT_ROOT))] = {"rows": len(rows)}
     return {"synthetic_ap": value, "synthetic_expected": expected, "tables": tables}
@@ -555,13 +597,15 @@ def main() -> None:
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     issues: list[Issue] = []
+    weight_roots = resolve_weight_roots(args.checkpoint_root)
     report = {
         "project_root": str(PROJECT_ROOT),
+        "checkpoint_roots": {key: str(value) for key, value in weight_roots.items()},
         "datasets": audit_datasets(issues, int(args.train_dimension_samples)),
-        "checkpoints": audit_checkpoints(issues),
-        "calibration_candidates": audit_candidates(issues),
+        "checkpoints": audit_checkpoints(issues, weight_roots),
+        "calibration_candidates": audit_candidates(issues, weight_roots),
         "stored_evaluations": audit_summaries(issues),
-        "ap_regression": audit_ap(issues),
+        "ap_regression": audit_ap(issues, require_results=bool(args.require_results)),
     }
     report["issue_counts"] = dict(Counter(issue.severity for issue in issues))
     report["issues"] = [asdict(issue) for issue in issues]

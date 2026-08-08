@@ -34,13 +34,25 @@ class TargetSpec:
     name: str
     official_root_flag: str
     official_root: Path
+    split_file: str = "splits/test.txt"
     match_tolerance: float = 0.0075
     gt_threshold: float = 0.0
+    eval_gt_variant: str = "edge"
+    eval_gt_mode: str = "binary"
 
 
 TARGETS = {
     "BIPED": TargetSpec(
         "BIPED", "--biped-root", ROOT / "edge_data" / "official_rbcm" / "BIPED"
+    ),
+    "Multicue": TargetSpec(
+        "Multicue",
+        "--multicue-root",
+        ROOT / "edge_data" / "official_rbcm" / "Multicue",
+        split_file="splits/strict_68_12_20/test.txt",
+        gt_threshold=0.3,
+        eval_gt_variant="soft_vote",
+        eval_gt_mode="soft",
     ),
     "NYUDv2": TargetSpec(
         "NYUDv2",
@@ -79,6 +91,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument(
+        "--compute-internal-metrics",
+        action="store_true",
+        help="Also compute the calibration-path metrics used by the V5 same-domain table.",
+    )
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
 
@@ -96,6 +113,14 @@ def resolve_checkpoint_dir(args: argparse.Namespace) -> Path:
     root = args.checkpoint_root.resolve()
     nested = root / "multicue_strict"
     return nested if nested.is_dir() else root
+
+
+def target_split_path(spec: TargetSpec) -> Path:
+    return ROOT / "edge_data" / "official_rbcm" / spec.name / spec.split_file
+
+
+def official_dir_name(args: argparse.Namespace) -> str:
+    return f"official{int(args.thresholds)}"
 
 
 def run(command: list[str], log_path: Path, done_path: Path, force: bool) -> None:
@@ -124,7 +149,7 @@ def run(command: list[str], log_path: Path, done_path: Path, force: bool) -> Non
 
 def apply_checkpoint(args: argparse.Namespace, spec: TargetSpec) -> Path:
     output_dir = args.output_root / "apply" / spec.name
-    split_file = ROOT / "edge_data" / "official_rbcm" / spec.name / "splits" / "test.txt"
+    split_file = target_split_path(spec)
     checkpoint_dir = resolve_checkpoint_dir(args)
     command = [
         args.python,
@@ -160,9 +185,9 @@ def apply_checkpoint(args: argparse.Namespace, spec: TargetSpec) -> Path:
         "--gt-threshold",
         str(spec.gt_threshold),
         "--eval-gt-variant",
-        "edge",
+        spec.eval_gt_variant,
         "--eval-gt-mode",
-        "binary",
+        spec.eval_gt_mode,
         "--nms-low-threshold",
         "0.02",
         "--modes",
@@ -172,15 +197,28 @@ def apply_checkpoint(args: argparse.Namespace, spec: TargetSpec) -> Path:
         "--candidate-split",
         "val",
         "--save-predictions",
-        "--skip-internal-metrics",
     ]
+    if not args.compute_internal_metrics:
+        command.append("--skip-internal-metrics")
     if args.max_samples is not None:
         command.extend(["--max-samples", str(args.max_samples)])
+    summary_csv = output_dir / "summary.csv"
+    metrics_complete = False
+    if summary_csv.is_file():
+        with summary_csv.open(newline="", encoding="utf-8-sig") as handle:
+            existing = list(csv.DictReader(handle))
+        metrics_complete = bool(existing) and all(
+            str(row.get("metrics_skipped", "")).lower() == "false"
+            and row.get("ODS", "")
+            and row.get("OIS", "")
+            and row.get("AP", "")
+            for row in existing
+        )
     run(
         command,
         args.output_root / "logs" / f"apply_{spec.name}.log",
         output_dir / "summary.json",
-        args.force,
+        args.force or (args.compute_internal_metrics and not metrics_complete),
     )
     return output_dir
 
@@ -191,8 +229,8 @@ def evaluate_mode(
     apply_dir: Path,
     mode: str,
 ) -> Path:
-    output_dir = args.output_root / "official49" / spec.name / mode
-    split_file = ROOT / "edge_data" / "official_rbcm" / spec.name / "splits" / "test.txt"
+    output_dir = args.output_root / official_dir_name(args) / spec.name / mode
+    split_file = target_split_path(spec)
     command = [
         args.python,
         str(ROOT / "scripts" / "baselines" / "evaluate_official_edges.py"),
@@ -233,16 +271,18 @@ def evaluate_mode(
 
 def build_summary(args: argparse.Namespace) -> None:
     rows: list[dict[str, object]] = []
-    for target in args.targets:
+    # Rebuild from every completed target so an incremental rerun cannot
+    # truncate the canonical summary to only the targets requested this time.
+    for target in TARGETS:
         for mode in MODES:
-            path = args.output_root / "official49" / target / mode / "summary.json"
+            path = args.output_root / official_dir_name(args) / target / mode / "summary.json"
             if not path.exists():
                 continue
             report = json.loads(path.read_text(encoding="utf-8"))
             selected = report["selected"]
             curve_path = (
                 args.output_root
-                / "official49"
+                / official_dir_name(args)
                 / target
                 / mode
                 / "pr_curve_as_is.csv"
@@ -266,7 +306,7 @@ def build_summary(args: argparse.Namespace) -> None:
             )
     if not rows:
         return
-    summary_path = args.output_root / "generalization_summary_official49.csv"
+    summary_path = args.output_root / f"generalization_summary_official{int(args.thresholds)}.csv"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     with summary_path.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))

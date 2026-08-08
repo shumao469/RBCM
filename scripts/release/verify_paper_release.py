@@ -73,8 +73,10 @@ def verify_membership(root: Path) -> None:
         "src/rbcm_edge/models/losses.py",
         "scripts/experiments/calibrate.py",
         "scripts/experiments/evaluate_generalization.py",
+        "scripts/experiments/evaluate_biped_multicue.py",
         "scripts/analysis/evaluate_nyud_strict_generalization.py",
         "scripts/analysis/build_v5_result_tables.py",
+        "scripts/analysis/build_v5_reproduction_inputs.py",
         "scripts/analysis/reproduce_figure5_relative_statistics.py",
         "scripts/figures/bridge/render_figure5_relative_panels.py",
         "scripts/figures/edge/generate_multicue_strict_pr_curves.py",
@@ -174,6 +176,27 @@ def verify_v5_reproduction_contract(root: Path) -> None:
     ).read_text(encoding="utf-8")
     if '"--checkpoint-root"' not in pr_generator or "multicue_strict" not in pr_generator:
         raise RuntimeError("MultiCue PR reproduction cannot resolve release checkpoints")
+    if '"Multicue"' not in pr_generator or "strict_68_12_20/test.txt" not in pr_generator:
+        raise RuntimeError("Figure 5 reproduction does not generate strict MultiCue predictions")
+
+    training = (root / "edge_model/train.py").read_text(encoding="utf-8")
+    if "best_validation_metric.pt" not in training or "validation score" not in training:
+        raise RuntimeError("Best-checkpoint naming does not identify validation selection")
+    if "best_train_metric.pt" not in training:
+        raise RuntimeError("Legacy checkpoint fallback was removed instead of retained read-only")
+
+    auditor = (root / "scripts/checks/audit_edge_pipeline_integrity.py").read_text(
+        encoding="utf-8"
+    )
+    if '"--checkpoint-root"' not in auditor or "multicue_strict" not in auditor:
+        raise RuntimeError("Integrity auditor cannot resolve the public pretrained layout")
+
+    orchestrator = (root / "scripts/release/reproduce_release.py").read_text(
+        encoding="utf-8"
+    )
+    for required_stage in ("inference", "inputs", "tables", "audit"):
+        if f'"{required_stage}"' not in orchestrator:
+            raise RuntimeError(f"Release pipeline is missing the {required_stage} stage")
 
 
 def verify_v5_configs(root: Path) -> None:
@@ -340,8 +363,12 @@ def verify_text_safety(root: Path) -> None:
         "/workspace/" + "RBCM-Edge",
         "D:\\" + "study\\project\\RBCM-Edge",
     )
+    verifier_paths = {
+        Path(__file__).resolve(),
+        (root / "scripts" / "release" / "verify_paper_release.py").resolve(),
+    }
     for path in root.rglob("*"):
-        if path.resolve() == Path(__file__).resolve():
+        if path.resolve() in verifier_paths:
             continue
         if path.is_file() and path.suffix.lower() in {".py", ".yaml", ".yml", ".md", ".txt"}:
             text = path.read_text(encoding="utf-8", errors="ignore")
