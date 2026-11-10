@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# Preserve executed runner bytes for historical SHA-256 receipts.
+/work/**/*.py -text

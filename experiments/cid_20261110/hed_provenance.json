@@ -1,0 +1,29 @@
+{
+  "weights": {
+    "url": "https://vcl.ucsd.edu/hed/hed_pretrained_bsds.caffemodel",
+    "bytes": 58876104,
+    "sha256": "4b6937684bce9be1ef5163c78ec812dff9a23653bfbb451925210a64ecfaaac7"
+  },
+  "author_repo": "https://github.com/s9xie/hed/tree/912632b986acc6dd6cc33b95603b2f279d7bd9f2",
+  "author_deploy": "https://github.com/s9xie/hed/blob/912632b986acc6dd6cc33b95603b2f279d7bd9f2/examples/hed/deploy.prototxt",
+  "author_tutorial": "https://github.com/s9xie/hed/blob/912632b986acc6dd6cc33b95603b2f279d7bd9f2/examples/hed/HED-tutorial.ipynb",
+  "author_crop": "https://github.com/s9xie/hed/blob/912632b986acc6dd6cc33b95603b2f279d7bd9f2/src/caffe/layers/crop_layer.cpp",
+  "citation": "https://openaccess.thecvf.com/content_iccv_2015/html/Xie_Holistically-Nested_Edge_Detection_ICCV_2015_paper.html",
+  "original_deploy_sha256": "378a9246383da889cf8e0290c47554d75dcf9c5b6bbabd8ab6c481c34aa12b8a",
+  "compatible_deploy_sha256": "0bfe16adaed03dbdb262749ff9737d853142ec9a2f384950369773261cfe39e0",
+  "inference": "OpenCV DNN CPU, original native size, raw sigmoid-fuse, no pre-NMS output rescale",
+  "opencv_version": "4.12.0",
+  "mean_bgr": [
+    104.00698793,
+    116.66876762,
+    122.67891434
+  ],
+  "crop_offsets": [
+    34,
+    35,
+    36,
+    38,
+    42
+  ],
+  "model_training": "Author-released BSDS-trained HED, no fine-tuning, not an equal training-data comparison"
+}
