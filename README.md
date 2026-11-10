@@ -53,5 +53,3 @@ tolerance. Its dilation matcher is a near-official common evaluator, not the
 exact BSDS Matlab bipartite matcher; comparisons must use and label one backend
 consistently.
 
-No code license is assigned automatically. Dataset and recording distribution
-remains governed by the original sources and applicable ethics/data-use terms.
