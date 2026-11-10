@@ -6,7 +6,7 @@ under the same backbone, and a separate nonzero-amplitude sensitivity analysis.
 
 - [CID experiment code, model provenance and inference](experiments/cid_20261110/)
 - [Pretrained checkpoints and source-locked model configurations](https://github.com/shumao469/RBCM/releases/tag/cid-2026-11-10)
-- [Original HED-lite / MEA reproduction release](https://github.com/shumao469/RBCM/tree/release), maintained by the [upstream RBCM-Edge project](https://github.com/liukaiming6563/RBCM-Edge/tree/release)
+- [HED-lite / MEA reproduction release](https://github.com/shumao469/RBCM/tree/release), maintained by the [upstream RBCM-Edge project](https://github.com/liukaiming6563/RBCM-Edge/tree/release)
 
 The context layer uses a calibrated detector score and normalized input Sobel
 evidence. The source-domain protocol locks correction strength and deployment
