@@ -1,4 +1,4 @@
-# November 2026 CID experiment
+# CID experiment
 
 The [release assets](https://github.com/shumao469/RBCM/releases/tag/cid-2026-11-10)
 provide the original six RBCM HED-lite checkpoints and the frozen HED
