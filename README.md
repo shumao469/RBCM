@@ -1,7 +1,7 @@
 # RBCM Edge Detection
 
-The November 2026 extension evaluates source-selected contextual corrections on
-frozen detectors. It includes the CID comparison, original HED and HED+RBCM
+The source-selected contextual corrections on
+frozen detector evaluation includes the CID comparison, original HED and HED+RBCM
 under the same backbone, and a separate nonzero-amplitude sensitivity analysis.
 
 - [Latest experiment code, model provenance and inference](experiments/cid_20261110/)
